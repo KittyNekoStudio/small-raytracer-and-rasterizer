@@ -5,6 +5,9 @@
 #include <limits>
 #include <optional>
 #include <vector>
+#include <tuple>
+
+using namespace std;
 
 const auto canvas_width{600};
 const auto canvas_height{600};
@@ -19,14 +22,16 @@ class Sphere {
     double radius;
     Color color;
     int specular;
+    float reflective;
 
     Sphere() {}
 
-    Sphere(vec3 cen, double rad, Color col, int spec) {
+    Sphere(vec3 cen, double rad, Color col, int spec, float ref) {
         center = cen;
         radius = rad;
         color = col;
         specular = spec;
+        reflective = ref;
     }
 };
 
@@ -66,8 +71,8 @@ class Light {
 class Scene {
   public:
     Color background_color;
-    std::vector<Light> lights;
-    std::vector<Sphere> spheres;
+    vector<Light> lights;
+    vector<Sphere> spheres;
 
     Scene() {}
 };
@@ -80,13 +85,21 @@ Color MultiplyColor(double intensity, Color color) {
     return Color{r, g, b, color.a};
 }
 
+Color AddColor(Color color1, Color color2) {
+    color1.r += color2.r;
+    color1.g += color2.g;
+    color1.b += color2.b;
+
+    return color1;
+}
+
 vec3 CanvasToViewport(double x, double y) {
     return {x * viewport_width / canvas_width,
             y * viewport_height / canvas_height, distance_from_camera};
 }
 
-std::array<double, 2> IntersectRaySphere(vec3 origin, vec3 direction,
-                                         Sphere sphere) {
+array<double, 2> IntersectRaySphere(vec3 origin, vec3 direction,
+                                    Sphere sphere) {
     auto r{sphere.radius};
     auto co{origin - sphere.center};
 
@@ -97,64 +110,22 @@ std::array<double, 2> IntersectRaySphere(vec3 origin, vec3 direction,
 
     auto discriminant{b * b - 4.0 * a * c};
     if (discriminant < 0.0) {
-        std::array<double, 2> infinity{std::numeric_limits<double>::infinity(),
-                                       std::numeric_limits<double>::infinity()};
+        array<double, 2> infinity{numeric_limits<double>::infinity(),
+                                  numeric_limits<double>::infinity()};
         return infinity;
     }
 
     auto t1{(-b + sqrt(discriminant)) / (2.0 * a)};
     auto t2{(-b - sqrt(discriminant)) / (2.0 * a)};
-    std::array<double, 2> t{t1, t2};
+    array<double, 2> t{t1, t2};
     return t;
 }
 
-float ComputeLighting(vec3 position, vec3 normal, vec3 toward_camera,
-                      int specular, Scene scene) {
-    float intensity{0.0};
-
-    for (Light light : scene.lights) {
-        if (light.type == LightType::ambient) {
-            intensity += light.intensity;
-        } else {
-            vec3 light_vector{vec3(0.0, 0.0, 0.0)};
-            float light_intensity{0.0};
-            if (light.type == LightType::point) {
-                light_vector = light.position - position;
-                light_intensity = light.intensity;
-            } else {
-                light_vector = light.direction;
-                light_intensity = light.intensity;
-            }
-            auto normal_light_dot{dot(normal, light_vector)};
-
-            // Diffuse light
-            if (normal_light_dot > 0.0) {
-                intensity += light_intensity * normal_light_dot /
-                             (normal.length() * light_vector.length());
-            }
-
-            // Specular light
-            if (specular != -1) {
-                auto reflection{2 * normal * dot(normal, light_vector) -
-                                light_vector};
-                auto reflection_dot_to_camera{dot(reflection, toward_camera)};
-                if (reflection_dot_to_camera > 0) {
-                    intensity +=
-                        light.intensity * std::pow(reflection_dot_to_camera /
-                                                       (reflection.length() *
-                                                        toward_camera.length()),
-                                                   specular);
-                }
-            }
-        }
-    }
-    return intensity;
-}
-
-Color TraceRay(vec3 origin, vec3 direction, double t_min, double t_max,
-               Scene scene) {
-    auto closest_t{std::numeric_limits<double>::infinity()};
-    std::optional<Sphere> closest_shpere{};
+tuple<optional<Sphere>, double> ClosestIntersection(vec3 origin, vec3 direction,
+                                                    double t_min, double t_max,
+                                                    Scene scene) {
+    auto closest_t{numeric_limits<double>::infinity()};
+    optional<Sphere> closest_shpere{};
 
     for (Sphere entity : scene.spheres) {
         auto t{(IntersectRaySphere(origin, direction, entity))};
@@ -167,22 +138,103 @@ Color TraceRay(vec3 origin, vec3 direction, double t_min, double t_max,
             closest_shpere = entity;
         }
     }
-
-    if (closest_shpere == std::nullopt) {
-        return scene.background_color;
-    } else {
-        auto position{origin + (direction * closest_t)};
-        auto normal{position - closest_shpere->center};
-        normal = normal / normal.length();
-
-        return MultiplyColor(ComputeLighting(position, normal, -direction,
-                                             closest_shpere->specular, scene),
-                             closest_shpere->color);
-    }
+    return tuple<optional<Sphere>, double>{
+        make_tuple(closest_shpere, closest_t)};
 }
 
-Scene CreateScene(Color background, std::vector<Sphere> spheres,
-                  std::vector<Light> lights) {
+vec3 ReflectRay(vec3 ray, vec3 normal) {
+    auto normal_dot_ray{dot(normal, ray)};
+    return normal * (2.0 * normal_dot_ray) - ray;
+}
+
+float ComputeLighting(vec3 position, vec3 normal, vec3 toward_camera,
+                      int specular, Scene scene) {
+    float intensity{0.0};
+
+    for (Light light : scene.lights) {
+        if (light.type == LightType::ambient) {
+            intensity += light.intensity;
+        } else {
+            vec3 light_vector{vec3(0.0, 0.0, 0.0)};
+            float light_intensity{0.0};
+            auto t_max{0.0};
+            if (light.type == LightType::point) {
+                light_vector = light.position - position;
+                light_intensity = light.intensity;
+                t_max = 1.0;
+            } else {
+                light_vector = light.direction;
+                light_intensity = light.intensity;
+                t_max = numeric_limits<double>::infinity();
+            }
+
+            // Shadow check
+            auto [shadow_sphere, shadow_t]{ClosestIntersection(
+                position, light_vector, 0.001, t_max, scene)};
+            if (shadow_sphere != nullopt) {
+                continue;
+            }
+
+            auto normal_light_dot{dot(normal, light_vector)};
+
+            // Diffuse light
+            if (normal_light_dot > 0.0) {
+                intensity += light_intensity * normal_light_dot /
+                             (normal.length() * light_vector.length());
+            }
+
+            // Specular light
+            if (specular != -1) {
+                auto reflection{ReflectRay(light_vector, normal)};
+                auto reflection_dot_to_camera{dot(reflection, toward_camera)};
+                if (reflection_dot_to_camera > 0.0) {
+                    intensity +=
+                        light_intensity *
+                        pow(reflection_dot_to_camera /
+                                (reflection.length() * toward_camera.length()),
+                            specular);
+                }
+            }
+        }
+    }
+    return intensity;
+}
+
+Color TraceRay(vec3 origin, vec3 direction, double t_min, double t_max,
+               int recursion_depth, Scene scene) {
+    auto [closest_shpere, closest_t]{
+        ClosestIntersection(origin, direction, t_min, t_max, scene)};
+
+    if (closest_shpere == nullopt) {
+        return scene.background_color;
+    } else {
+
+        auto position{origin + (direction * closest_t)};
+        auto normal{position - closest_shpere->center};
+        auto normal_norm = normal / normal.length();
+
+        Color local_color{
+            MultiplyColor(ComputeLighting(position, normal_norm, -direction,
+                                          closest_shpere->specular, scene),
+                          closest_shpere->color)};
+
+        if (recursion_depth <= 0 | closest_shpere->reflective <= 0) {
+            return local_color;
+        }
+
+        auto reflected_ray{ReflectRay(-direction, normal_norm)};
+        Color reflected_color{TraceRay(position, reflected_ray, 0.001,
+                                       numeric_limits<double>::infinity(),
+                                       recursion_depth - 1, scene)};
+
+        auto color1{MultiplyColor(1 - closest_shpere->reflective, local_color)};
+        auto color2{MultiplyColor(closest_shpere->reflective, reflected_color)};
+
+        return AddColor(color1, color2);
+    }
+}
+Scene CreateScene(Color background, vector<Sphere> spheres,
+                  vector<Light> lights) {
     Scene scene{};
     scene.background_color = background;
     scene.spheres = spheres;
@@ -198,17 +250,19 @@ void PutPixel(int x, int y, Color color) {
 }
 
 int main() {
-    const std::vector<Sphere> spheres{
-        Sphere(vec3(0, -1, 3), 1, Color{255, 0, 0, 255}, 500),
-        Sphere(vec3(2, 0, 4), 1, Color{0, 0, 255, 255}, 500),
-        Sphere(vec3(-2, 0, 4), 1, Color{0, 255, 0, 255}, 10),
-        Sphere(vec3(0, -5001, 0), 5000, Color{255, 255, 0, 255}, 1000)};
-    const std::vector<Light> lights{
+    const vector<Sphere> spheres{
+        Sphere(vec3(0, -1, 3), 1, Color{255, 0, 0, 255}, 500, 0.2),
+        Sphere(vec3(2, 0, 4), 1, Color{0, 0, 255, 255}, 500, 0.3),
+        Sphere(vec3(-2, 0, 4), 1, Color{0, 255, 0, 255}, 10, 0.4),
+        Sphere(vec3(0, -5001, 0), 5000, Color{255, 255, 0, 255}, 1000, 0.5),
+    };
+    const vector<Light> lights{
         Light(LightType::ambient, 0.2, vec3(0, 0, 0)),
         Light(LightType::point, 0.6, vec3(2, 1, 0)),
-        Light(LightType::directional, 0.2, vec3(1, 4, 4))};
+        Light(LightType::directional, 0.2, vec3(1, 4, 4)),
+    };
 
-    Scene scene{CreateScene(RAYWHITE, spheres, lights)};
+    Scene scene{CreateScene(BLACK, spheres, lights)};
 
     InitWindow(canvas_width, canvas_height, "Ray tracer");
     SetTargetFPS(60);
@@ -221,11 +275,12 @@ int main() {
             for (auto y{-canvas_height / 2}; y <= canvas_height / 2; y++) {
                 auto d{CanvasToViewport(x, y)};
                 auto color{TraceRay(camera_position, d, 1,
-                                    std::numeric_limits<double>::infinity(),
+                                    numeric_limits<double>::infinity(), 3,
                                     scene)};
                 PutPixel(x, y, color);
             }
         }
+
         EndDrawing();
     }
 
