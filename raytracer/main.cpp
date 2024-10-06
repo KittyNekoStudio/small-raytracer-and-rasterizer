@@ -14,7 +14,7 @@ const auto canvas_height{600};
 const auto viewport_width{1.0};
 const auto viewport_height{1.0};
 const auto distance_from_camera{1.0};
-const vec3 camera_position{0, 0, 0};
+vec3 camera_position{0, 0, 0};
 
 class Sphere {
   public:
@@ -249,6 +249,25 @@ void PutPixel(int x, int y, Color color) {
     DrawPixel(screen_width, screen_height, color);
 }
 
+void UpdateCamera() {
+    if (IsKeyPressed(KEY_W)) {
+        vec3 cp{vec3(0, 0, camera_position.z() + 1)};
+        camera_position = cp;
+    }
+    if (IsKeyPressed(KEY_A)) {
+        vec3 cp{vec3(camera_position.x() + -1, 0, 0)};
+        camera_position = cp;
+    }
+    if (IsKeyPressed(KEY_S)) {
+        vec3 cp{vec3(0, 0, camera_position.z() - 1)};
+        camera_position = cp;
+    }
+    if (IsKeyPressed(KEY_D)) {
+        vec3 cp{vec3(camera_position.x() + 1, 0, 0)};
+        camera_position = cp;
+    }
+}
+
 int main() {
     const vector<Sphere> spheres{
         Sphere(vec3(0, -1, 3), 1, Color{255, 0, 0, 255}, 500, 0.2),
@@ -268,8 +287,10 @@ int main() {
     SetTargetFPS(60);
 
     while (!WindowShouldClose()) {
+
         BeginDrawing();
         ClearBackground(RAYWHITE);
+        UpdateCamera();
 
         for (auto x{-canvas_width / 2}; x <= canvas_width / 2; x++) {
             for (auto y{-canvas_height / 2}; y <= canvas_height / 2; y++) {
@@ -280,7 +301,6 @@ int main() {
                 PutPixel(x, y, color);
             }
         }
-
         EndDrawing();
     }
 
