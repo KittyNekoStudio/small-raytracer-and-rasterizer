@@ -11,13 +11,23 @@ const auto canvas_height{600};
 struct Point {
     float x;
     float y;
+    float h;
     Point() {}
 
-    Point(float xPos, float yPos) {
-        x = xPos;
-        y = yPos;
+    Point(float xVal, float yVal, float hVal) {
+        x = xVal;
+        y = yVal;
+        h = hVal;
     }
 };
+
+Color MultiplyColor(double intensity, Color color) {
+    unsigned char r = color.r * intensity > 255 ? 255 : color.r * intensity;
+    unsigned char g = color.g * intensity > 255 ? 255 : color.g * intensity;
+    unsigned char b = color.b * intensity > 255 ? 255 : color.b * intensity;
+
+    return Color{r, g, b, color.a};
+}
 
 void PutPixel(int x, int y, Color color) {
     auto screen_width{canvas_width / 2 + x};
@@ -73,49 +83,70 @@ void DrawWireframeTriangle(Point p0, Point p1, Point p2, Color color) {
     myDrawLine(p2, p0, color);
 }
 
-void DrawFilledTriangle(Point p0, Point p1, Point p2, Color color) {
-    auto corner0{p0};
-    auto corner1{p1};
-    auto corner2{p2};
-
-    if (corner1.y < corner0.y)
-        swap(corner1, corner0);
-    if (corner2.y < corner0.y)
-        swap(corner2, corner0);
-    if (corner2.y < corner1.y)
-        swap(corner2, corner1);
+void DrawShadedTriangle(Point p0, Point p1, Point p2, Color color) {
+    if (p1.y < p0.y)
+        swap(p1, p0);
+    if (p2.y < p0.y)
+        swap(p2, p0);
+    if (p2.y < p1.y)
+        swap(p2, p1);
 
     vector<float> x01{Interpolate(p0.y, p0.x, p1.y, p1.x)};
+    vector<float> h01{Interpolate(p0.y, p0.h, p1.y, p1.h)};
+
     vector<float> x12{Interpolate(p1.y, p1.x, p2.y, p2.x)};
+    vector<float> h12{Interpolate(p1.y, p1.h, p2.y, p2.h)};
+
     vector<float> x02{Interpolate(p0.y, p0.x, p2.y, p2.x)};
+    vector<float> h02{Interpolate(p0.y, p0.h, p2.y, p2.h)};
 
     vector<float> x012{};
     x01.pop_back();
     x012.insert(x012.begin(), x01.begin(), x01.end());
     x012.insert(x012.end(), x12.begin(), x12.end());
-    auto m{x012.size() / 2};
+
+    vector<float> h012{};
+    h01.pop_back();
+    h012.insert(h012.begin(), h01.begin(), h01.end());
+    h012.insert(h012.end(), h12.begin(), h12.end());
 
     vector<float> xLeft{};
     vector<float> xRight{};
+    vector<float> hLeft{};
+    vector<float> hRight{};
 
+    auto m{x012.size() / 2};
     if (x02[m] < x012[m]) {
         xLeft = x02;
+        hLeft = h02;
+
         xRight = x012;
+        hRight = h012;
     } else {
         xLeft = x012;
+        hLeft = h012;
+
         xRight = x02;
+        hRight = h02;
     }
 
-    for (auto y{p0.y}; y < p2.y; y++) {
-        for (auto x{xLeft[y - p0.y]}; x < xRight[y - p0.y]; x++) {
-            PutPixel(x, y, color);
+    for (float y{p0.y}; y < p2.y; y++) {
+        float xL{xLeft[y - p0.y]};
+        float xR{xRight[y - p0.y]};
+
+        vector<float> hSegment{
+            Interpolate(xL, hLeft[y - p0.y], xR, hRight[y - p0.y])};
+        for (float x{xL}; x < xR; x++) {
+            Color shadedColor{MultiplyColor(hSegment[x - xL], color)};
+            PutPixel(x, y, shadedColor);
         }
     }
 }
+
 int main() {
-    Point point1{Point(-200, -250)};
-    Point point2{Point(200, 50)};
-    Point point3{Point(20, 250)};
+    Point point1{Point(-200, -250, 0.3)};
+    Point point2{Point(200, 50, 0.1)};
+    Point point3{Point(20, 250, 1.0)};
 
     SetConfigFlags(FLAG_WINDOW_RESIZABLE);
     InitWindow(canvas_width, canvas_height, "Rasterizer");
@@ -126,8 +157,7 @@ int main() {
         BeginDrawing();
         ClearBackground(RAYWHITE);
 
-        DrawFilledTriangle(point1, point2, point3, GREEN);
-        DrawWireframeTriangle(point1, point2, point3, BLACK);
+        DrawShadedTriangle(point1, point2, point3, GREEN);
 
         EndDrawing();
     }
